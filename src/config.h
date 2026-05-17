@@ -1,0 +1,66 @@
+#pragma once
+
+/***********************config*************************/
+#define LCD_USB_QSPI_DRIVER 1
+
+#define SPI_FREQUENCY 32000000
+#define TFT_SPI_MODE SPI_MODE0
+#define TFT_SPI_HOST SPI2_HOST
+#define ALS_ADDRESS 0x3B
+
+// #define WIFI_SSID "emf2026-open"
+#define WIFI_SSID "vodafone76F9EE"
+#define WIFI_PASSWORD "ZJEkrYTPzPsrG32h"
+#define WIFI_CONNECT_WAIT_MAX 10000
+// #define SERVER "bar.emf.camp"
+#define SERVER "192.168.1.5"
+#define HTTP_PORT 8000
+#define WEBSOCKET_PORT 8001
+#define WEBSOCKET_PATH "/websocket"
+#define STOCKLINES_PATH "/api/stocklines.json?output=full&location=Bar"
+#define PUMP_NUMBER 2                 // Stock line is 100 - 103 across pumps 1-4, so pump 2 is stock line 102
+#define STOCK_LINE (PUMP_NUMBER + 99) // Stock line is 100 - 103 across the pumps
+#define POLL_INTERVAL 10000           // Time in ms between polling if websockets aren't connected
+
+/***********************config*************************/
+
+#define TFT_WIDTH 180
+#define TFT_HEIGHT 640
+
+#ifdef TFT_WIDTH
+#define EXAMPLE_LCD_H_RES TFT_WIDTH
+#else
+#define EXAMPLE_LCD_H_RES 180
+#endif
+#ifdef TFT_HEIGHT
+#define EXAMPLE_LCD_V_RES TFT_HEIGHT
+#else
+#define EXAMPLE_LCD_V_RES 640
+#endif
+#define LVGL_LCD_BUF_SIZE (EXAMPLE_LCD_H_RES * EXAMPLE_LCD_V_RES)
+
+#define SEND_BUF_SIZE (28800 / 2) // 16bit(RGB565)
+
+#define TFT_QSPI_CS 12
+#define TFT_QSPI_SCK 17
+#define TFT_QSPI_D0 13
+#define TFT_QSPI_D1 18
+#define TFT_QSPI_D2 21
+#define TFT_QSPI_D3 14
+#define TFT_QSPI_RST 16
+#define TFT_BL 1
+
+#define PIN_BAT_VOLT 2
+
+#define PIN_BUTTON_1 0
+#define PIN_BUTTON_2 21
+
+#define SPI_SD_CS 38
+#define SPI_SD_MOSI 39
+#define SPI_SD_MISO 41
+#define SPI_SD_SCLK 40
+
+#define TOUCH_IICSCL 10
+#define TOUCH_IICSDA 15
+#define TOUCH_INT 11
+#define TOUCH_RES 16
