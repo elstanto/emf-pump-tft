@@ -8,19 +8,9 @@
 #define TFT_SPI_HOST SPI2_HOST
 #define ALS_ADDRESS 0x3B
 
-// #define WIFI_SSID "emf2026-open"
-#define WIFI_SSID "vodafone76F9EE"
-#define WIFI_PASSWORD "ZJEkrYTPzPsrG32h"
-#define WIFI_CONNECT_WAIT_MAX 10000
-// #define SERVER "bar.emf.camp"
-#define SERVER "192.168.1.5"
-#define HTTP_PORT 8000
-#define WEBSOCKET_PORT 8001
-#define WEBSOCKET_PATH "/websocket"
-#define STOCKLINES_PATH "/api/stocklines.json?output=full&location=Bar"
 #define PUMP_NUMBER 2                 // Stock line is 100 - 103 across pumps 1-4, so pump 2 is stock line 102
 #define STOCK_LINE (PUMP_NUMBER + 99) // Stock line is 100 - 103 across the pumps
-#define POLL_INTERVAL 10000           // Time in ms between polling if websockets aren't connected
+#define POLL_INTERVAL 1000            // Time in ms between polling if websockets aren't connected
 
 /***********************config*************************/
 

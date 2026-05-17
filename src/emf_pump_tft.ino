@@ -1,29 +1,24 @@
 #include "lvgl.h" /* https://github.com/lvgl/lvgl.git */
 #include "config.h"
 #include "AXS15231B.h"
-#include "WiFi.h"
 #include <Arduino.h>
-#include <HTTPClient.h>
-#include <WiFiClientSecure.h>
-#include <esp_wifi.h>
 #define TOUCH_MODULES_CST_SELF
 #include <Wire.h>
 #include <SPI.h>
-#include <WebSocketsClient.h>
-#include <ArduinoJson.h>
 
 // See pins_config.h for all configuration
 
-bool ws_connected = false;
+bool bridge_connected = false;
 uint32_t last_poll_time = 0;
+uint32_t last_receive_time = 0;
+int pump_number = PUMP_NUMBER;
 char stock_name[40] = "";
 float stock_abv = 0;
 char stock_manufacturer[40] = "";
-int pints_total = 144;
-int pints_remaining = 25;
+float pints_total = 100;
+float pints_remaining = 0;
 
 lv_obj_t *progress_bar;
-WebSocketsClient webSocket;
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t *buf;
@@ -52,30 +47,6 @@ void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area,
 #endif
 }
 
-void check_wifi()
-{
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-        Serial.println("Connecting to " WIFI_SSID "...");
-        lv_timer_handler(); // Update the display to show the connection status
-        uint32_t last_tick = millis();
-        while (WiFi.status() != WL_CONNECTED && millis() - last_tick < WIFI_CONNECT_WAIT_MAX && WiFi.status() != WL_CONNECT_FAILED)
-        {
-            delay(500);
-            Serial.print(".");
-        }
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            Serial.println("\nConnected to " WIFI_SSID "!");
-            Serial.print("IP address: ");
-            Serial.println(WiFi.localIP());
-            Serial.println("Connecting to WebSocket server at " SERVER ":" + String(WEBSOCKET_PORT) + WEBSOCKET_PATH "...");
-            webSocket.begin(SERVER, WEBSOCKET_PORT, WEBSOCKET_PATH, "");
-        }
-    }
-}
-
 void ui_draw_status_bar()
 {
     // Draw a status bar at the top of the screen to show the pump/stockline number (align left), mqtt and http status (align centre) and wifi status (align right)
@@ -89,27 +60,15 @@ void ui_draw_status_bar()
     lv_label_set_text(pump_stockline_label, label_text.c_str());
     lv_obj_set_style_text_color(pump_stockline_label, lv_color_white(), 0);
 
-    static lv_obj_t *mqtt_http_label = NULL;
-    if (mqtt_http_label == NULL)
+    static lv_obj_t *bridge_status_label = NULL;
+    if (bridge_status_label == NULL)
     {
-        mqtt_http_label = lv_label_create(lv_layer_sys());
-        lv_obj_align(mqtt_http_label, LV_ALIGN_TOP_MID, 0, 5);
+        bridge_status_label = lv_label_create(lv_layer_sys());
+        lv_obj_align(bridge_status_label, LV_ALIGN_TOP_RIGHT, -5, 5);
     }
-    String mqtt_http_text = "MQTT: " + String(ws_connected ? "Connected" : "Disconnected");
-    lv_label_set_text(mqtt_http_label, mqtt_http_text.c_str());
-    lv_obj_set_style_text_color(mqtt_http_label, ws_connected ? lv_palette_main(LV_PALETTE_GREEN) : lv_palette_main(LV_PALETTE_RED), 0);
-    lv_obj_set_style_text_align(mqtt_http_label, LV_TEXT_ALIGN_CENTER, 0);
-
-    static lv_obj_t *wifi_status_label = NULL;
-    if (wifi_status_label == NULL)
-    {
-        wifi_status_label = lv_label_create(lv_layer_sys());
-        lv_obj_align(wifi_status_label, LV_ALIGN_TOP_RIGHT, -5, 5);
-    }
-    bool wifi_connected = WiFi.isConnected();
-    lv_label_set_text(wifi_status_label, wifi_connected ? WIFI_SSID ": Connected" : "WiFi: Connecting...");
-    lv_obj_set_style_text_color(wifi_status_label, wifi_connected ? lv_palette_main(LV_PALETTE_GREEN) : lv_palette_main(LV_PALETTE_RED), 0);
-    lv_obj_set_style_text_align(wifi_status_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_text(bridge_status_label, bridge_connected ? "Serial Link Active" : "Serial Link Timeout...");
+    lv_obj_set_style_text_color(bridge_status_label, bridge_connected ? lv_palette_main(LV_PALETTE_GREEN) : lv_palette_main(LV_PALETTE_RED), 0);
+    lv_obj_set_style_text_align(bridge_status_label, LV_TEXT_ALIGN_RIGHT, 0);
 
     // Add a horizontal line below the status bar
     static lv_obj_t *status_bar_line = NULL;
@@ -175,99 +134,11 @@ lv_obj_t *ui_draw_progress_bar()
 
     lv_obj_t *bar = lv_bar_create(lv_scr_act());
     lv_obj_add_style(bar, &style_indic, LV_PART_INDICATOR);
-    lv_bar_set_range(bar, 0, pints_total);
+    lv_bar_set_range(bar, 0, (int)pints_total);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_size(bar, EXAMPLE_LCD_V_RES, 20);
     lv_obj_add_event_cb(bar, ui_progress_bar_event_cb, LV_EVENT_DRAW_PART_END, NULL);
     return bar;
-}
-
-void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
-{
-
-    switch (type)
-    {
-    case WStype_DISCONNECTED:
-        Serial.printf("[WSc] Disconnected!\n");
-        break;
-    case WStype_CONNECTED:
-        Serial.printf("[WSc] Connected to url: %s\n", payload);
-
-        // send message to server when Connected
-        webSocket.sendTXT("SUBSCRIBE stockline/" + String(STOCK_LINE));
-        break;
-    case WStype_TEXT:
-        Serial.printf("[WSc] get text: %s\n", payload);
-        update_via_websocket(payload);
-        break;
-    case WStype_ERROR:
-        Serial.printf("[WSc] error type: %d\n", payload[0]);
-        break;
-    case WStype_FRAGMENT_TEXT_START:
-    case WStype_FRAGMENT_BIN_START:
-    case WStype_FRAGMENT:
-    case WStype_FRAGMENT_FIN:
-        break;
-    }
-}
-
-void update_via_rest()
-{
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        HTTPClient http;
-        http.begin(SERVER, HTTP_PORT, STOCKLINES_PATH);
-        int httpCode = http.GET();
-        if (httpCode == HTTP_CODE_OK)
-        {
-            String payload = http.getString();
-            DynamicJsonDocument doc(1024);
-            DeserializationError error = deserializeJson(doc, payload);
-            if (error)
-            {
-                Serial.print("deserializeJson() failed: ");
-                Serial.println(error.c_str());
-                return;
-            }
-            // Extract values
-            JsonArray stocklines = doc["stocklines"].as<JsonArray>();
-            for (JsonObject stockline : stocklines)
-            {
-                if (stockline["id"] == STOCK_LINE)
-                {
-                    strlcpy(stock_name, stockline["stockitem"]["stocktype"]["name"], sizeof(stock_name));
-                    stock_abv = stockline["stockitem"]["stocktype"]["abv"];
-                    strlcpy(stock_manufacturer, stockline["stockitem"]["stocktype"]["manufacturer"], sizeof(stock_manufacturer));
-                    pints_total = stockline["stockitem"]["size"];
-                    pints_remaining = stockline["stockitem"]["remaining"];
-                    break;
-                }
-            }
-        }
-        else
-        {
-            Serial.println("HTTP GET failed, error: " + http.errorToString(httpCode));
-        }
-        http.end();
-    }
-}
-
-void update_via_websocket(uint8_t *payload)
-{
-    DynamicJsonDocument doc(1024);
-    DeserializationError error = deserializeJson(doc, (char *)payload);
-    if (error)
-    {
-        Serial.print("deserializeJson() failed: ");
-        Serial.println(error.c_str());
-        return;
-    }
-    // Extract values
-    strlcpy(stock_name, doc["stockitem"]["stocktype"]["name"], sizeof(stock_name));
-    stock_abv = doc["stockitem"]["stocktype"]["abv"];
-    strlcpy(stock_manufacturer, doc["stockitem"]["stocktype"]["manufacturer"], sizeof(stock_manufacturer));
-    pints_total = doc["stockitem"]["size"];
-    pints_remaining = doc["stockitem"]["remaining"];
 }
 
 void ui_update_stockitem()
@@ -277,8 +148,8 @@ void ui_update_stockitem()
     {
         stock_manufacturer_label = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(stock_manufacturer_label, &lv_font_montserrat_42, 0);
-        lv_obj_align(stock_manufacturer_label, LV_ALIGN_TOP_LEFT, 5, 35);
-        lv_obj_set_width(stock_manufacturer_label, EXAMPLE_LCD_V_RES - 20);
+        lv_obj_align(stock_manufacturer_label, LV_ALIGN_TOP_LEFT, 0, 35);
+        lv_obj_set_width(stock_manufacturer_label, EXAMPLE_LCD_V_RES - 160);
         lv_obj_set_style_text_align(stock_manufacturer_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(stock_manufacturer_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     }
@@ -291,7 +162,7 @@ void ui_update_stockitem()
         stock_name_label = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(stock_name_label, &lv_font_montserrat_42, 0);
         lv_obj_align(stock_name_label, LV_ALIGN_CENTER, 0, 30);
-        lv_obj_set_width(stock_name_label, EXAMPLE_LCD_V_RES - 20);
+        lv_obj_set_width(stock_name_label, EXAMPLE_LCD_V_RES);
         lv_obj_set_style_text_align(stock_name_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_long_mode(stock_name_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     }
@@ -312,14 +183,57 @@ void ui_update_stockitem()
     lv_label_set_text(stock_abv_label, abv_text);
     lv_obj_set_style_text_color(stock_abv_label, lv_color_white(), 0);
 
-    lv_bar_set_value(progress_bar, pints_remaining, LV_ANIM_OFF);
+    lv_bar_set_range(progress_bar, 0, (int)pints_total);
+    lv_bar_set_value(progress_bar, (int)pints_remaining, LV_ANIM_OFF);
+}
+
+void request_data_via_serial()
+{
+    Serial.println(pump_number);
+}
+
+void check_serial_for_data()
+{
+    while (Serial.available() > 0)
+    {
+        String line = Serial.readStringUntil('\n');
+        line.trim();
+        if (line.startsWith(pump_number + ":"))
+        {
+            bridge_connected = true;
+            last_receive_time = millis();
+            // Expected format is "pump_number:stock_name,stock_manufacturer,stock_abv,pints_total,pints_remaining"
+            String data = line.substring(line.indexOf(':') + 1);
+            int first_comma = data.indexOf(',');
+            int second_comma = data.indexOf(',', first_comma + 1);
+            int third_comma = data.indexOf(',', second_comma + 1);
+            int fourth_comma = data.indexOf(',', third_comma + 1);
+            if (first_comma == -1 || second_comma == -1 || third_comma == -1 || fourth_comma == -1)
+            {
+                Serial.println("Invalid data format received: " + line);
+                continue;
+            }
+            String stock_name_str = data.substring(0, first_comma);
+            String stock_manufacturer_str = data.substring(first_comma + 1, second_comma);
+            String stock_abv_str = data.substring(second_comma + 1, third_comma);
+            String pints_total_str = data.substring(third_comma + 1, fourth_comma);
+            String pints_remaining_str = data.substring(fourth_comma + 1);
+            stock_name_str.toCharArray(stock_name, sizeof(stock_name));
+            stock_manufacturer_str.toCharArray(stock_manufacturer, sizeof(stock_manufacturer));
+            stock_abv = stock_abv_str.toFloat();
+            pints_total = pints_total_str.toFloat();
+            pints_remaining = pints_remaining_str.toFloat();
+        }
+    }
+    if (millis() - last_receive_time > POLL_INTERVAL)
+    {
+        bridge_connected = false;
+    }
 }
 
 void setup()
 {
-
     Serial.begin(115200);
-    Serial.println("sta\n");
 
     axs15231_init();
 
@@ -331,7 +245,6 @@ void setup()
     {
         while (1)
         {
-            Serial.println("buf NULL");
             delay(500);
         }
     }
@@ -341,7 +254,6 @@ void setup()
     {
         while (1)
         {
-            Serial.println("buf NULL");
             delay(500);
         }
     }
@@ -367,25 +279,19 @@ void setup()
 
     ui_draw_status_bar();
     progress_bar = ui_draw_progress_bar();
-    lv_bar_set_value(progress_bar, pints_remaining, LV_ANIM_OFF);
+    lv_bar_set_value(progress_bar, pints_remaining, LV_ANIM_ON);
     lv_timer_handler();
-
-    webSocket.onEvent(webSocketEvent);
-
-    Serial.println("end\n");
 }
 
 void loop()
 {
     delay(1);
-    check_wifi();
-    webSocket.loop();
-    ws_connected = webSocket.isConnected();
-    if (ws_connected && millis() - last_poll_time >= POLL_INTERVAL)
+    if (millis() - last_poll_time >= POLL_INTERVAL)
     {
-        update_via_rest();
+        request_data_via_serial();
         last_poll_time = millis();
     }
+    check_serial_for_data();
     ui_draw_status_bar();
     ui_update_stockitem();
     lv_timer_handler();
