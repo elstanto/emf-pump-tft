@@ -8,9 +8,8 @@
 #define TFT_SPI_HOST SPI2_HOST
 #define ALS_ADDRESS 0x3B
 
-#define PUMP_NUMBER 2                 // Stock line is 100 - 103 across pumps 1-4, so pump 2 is stock line 102
-#define STOCK_LINE (PUMP_NUMBER + 99) // Stock line is 100 - 103 across the pumps
-#define POLL_INTERVAL 1000            // Time in ms between polling if websockets aren't connected
+#define PUMP_NUMBER 2      // Pump number (1-4)
+#define POLL_INTERVAL 1000 // Time in ms between polling if websockets aren't connected
 
 /***********************config*************************/
 
