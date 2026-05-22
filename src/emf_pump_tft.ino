@@ -35,6 +35,7 @@ int pump_number = PUMP_NUMBER;
 char stock_name[40] = "";
 float stock_abv = -1;
 char stock_manufacturer[40] = "";
+char note[100] = "";
 float pints_total = 100;
 float pints_remaining = 0;
 
@@ -197,20 +198,33 @@ void ui_draw_status_bar()
     {
         pump_stockline_label = lv_label_create(btn);
         lv_obj_center(pump_stockline_label);
+        lv_obj_set_style_text_color(pump_stockline_label, lv_color_white(), 0);
     }
     String label_text = "Pump " + String(pump_number);
     lv_label_set_text(pump_stockline_label, label_text.c_str());
-    lv_obj_set_style_text_color(pump_stockline_label, lv_color_white(), 0);
+
+    // note field centered at the top with scroll on overflow
+    static lv_obj_t *note_label = NULL;
+    if (note_label == NULL)
+    {
+        note_label = lv_label_create(lv_scr_act());
+        lv_obj_align(note_label, LV_ALIGN_TOP_MID, -28, 5);
+        lv_obj_set_width(note_label, 420);
+        lv_obj_set_style_text_align(note_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(note_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_label_set_recolor(note_label, true);
+    }
+    lv_label_set_text(note_label, note);
 
     static lv_obj_t *bridge_status_label = NULL;
     if (bridge_status_label == NULL)
     {
         bridge_status_label = lv_label_create(lv_scr_act());
         lv_obj_align(bridge_status_label, LV_ALIGN_TOP_RIGHT, -5, 5);
+        lv_obj_set_style_text_align(bridge_status_label, LV_TEXT_ALIGN_RIGHT, 0);
     }
     lv_label_set_text(bridge_status_label, bridge_connected ? "Serial Link Active" : "Serial Link Timeout...");
     lv_obj_set_style_text_color(bridge_status_label, bridge_connected ? lv_palette_main(LV_PALETTE_GREEN) : lv_palette_main(LV_PALETTE_RED), 0);
-    lv_obj_set_style_text_align(bridge_status_label, LV_TEXT_ALIGN_RIGHT, 0);
 
     // Add a horizontal line below the status bar
     static lv_obj_t *status_bar_line = NULL;
@@ -354,24 +368,27 @@ void check_serial_for_data()
         {
             bridge_connected = true;
             last_receive_time = millis();
-            // Expected format is "pump_number:stock_name,stock_manufacturer,stock_abv,pints_total,pints_remaining"
+            // Expected format is "pump_number:stock_name,stock_manufacturer,note,stock_abv,pints_total,pints_remaining"
             String data = line.substring(colon_pos + 1);
             int first_comma = data.indexOf(',');
             int second_comma = data.indexOf(',', first_comma + 1);
             int third_comma = data.indexOf(',', second_comma + 1);
             int fourth_comma = data.indexOf(',', third_comma + 1);
-            if (first_comma == -1 || second_comma == -1 || third_comma == -1 || fourth_comma == -1)
+            int fifth_comma = data.indexOf(',', fourth_comma + 1);
+            if (first_comma == -1 || second_comma == -1 || third_comma == -1 || fourth_comma == -1 || fifth_comma == -1)
             {
                 Serial.println("Invalid data format received: " + line);
                 continue;
             }
             String stock_name_str = data.substring(0, first_comma);
             String stock_manufacturer_str = data.substring(first_comma + 1, second_comma);
-            String stock_abv_str = data.substring(second_comma + 1, third_comma);
-            String pints_total_str = data.substring(third_comma + 1, fourth_comma);
-            String pints_remaining_str = data.substring(fourth_comma + 1);
+            String note_str = data.substring(second_comma + 1, third_comma);
+            String stock_abv_str = data.substring(third_comma + 1, fourth_comma);
+            String pints_total_str = data.substring(fourth_comma + 1, fifth_comma);
+            String pints_remaining_str = data.substring(fifth_comma + 1);
             stock_name_str.toCharArray(stock_name, sizeof(stock_name));
             stock_manufacturer_str.toCharArray(stock_manufacturer, sizeof(stock_manufacturer));
+            note_str.toCharArray(note, sizeof(note));
             stock_abv = stock_abv_str.toFloat();
             pints_total = pints_total_str.toFloat();
             pints_remaining = pints_remaining_str.toFloat();

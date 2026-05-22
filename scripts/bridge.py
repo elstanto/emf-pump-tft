@@ -26,6 +26,7 @@ serial_state_lock = asyncio.Lock()
 class Pump:
     name: str = ""
     manufacturer: str = ""
+    note: str = ""
     abv: float = -1
     total_pints: int = 100
     remaining_pints: int = 0
@@ -68,6 +69,7 @@ def update_pump_from_message(message: str) -> int | None:
         pumps[pump_id] = Pump(
             name=stocktype.get("name", ""),
             manufacturer=stocktype.get("manufacturer", ""),
+            note=data.get("note", ""),
             abv=stocktype.get("abv", 0),
             total_pints=stockitem.get("size", 0),
             remaining_pints=stockitem.get("remaining", 0),
@@ -92,7 +94,8 @@ def pump_to_reply_line(pump_id: int) -> str:
     p = pumps.get(pump_id, Pump())
     name = (p.name or "").replace("\n", " ").replace(",", " ")
     mfr  = (p.manufacturer or "").replace("\n", " ").replace(",", " ")
-    return f"{pump_id}:{name},{mfr},{p.abv},{p.total_pints},{p.remaining_pints}\n"
+    note = (p.note or "").replace("\n", " ").replace(",", " ")
+    return f"{pump_id}:{name},{mfr},{note},{p.abv},{p.total_pints},{p.remaining_pints}\n"
     
 async def push_pump_update(pump_id: int):
     reply = pump_to_reply_line(pump_id)
@@ -124,6 +127,7 @@ async def websocket_handler():
                     if isinstance(message, bytes):
                         message = message.decode("utf-8")
                     updated = update_pump_from_message(message)
+                    print(f"Received update for pump {updated}: {pumps.get(updated)}")
                     if updated is not None:
                         await push_pump_update(updated)
         except Exception as e:
